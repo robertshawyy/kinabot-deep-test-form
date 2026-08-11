@@ -68,6 +68,8 @@ test("protects the feedback radar with a server-side password session", async ()
   assert.doesNotMatch(authHelper, /cookie/i);
   assert.match(authHelper, /isLocalRequest\(request\) \? DEFAULT_ADMIN_PASSWORD : ""/);
   assert.match(authHelper, /DEFAULT_ADMIN_PASSWORD = "xyz123"/);
+  assert.doesNotMatch(insightRoute, /oai-authenticated-user-email|FEEDBACK_ADMIN_EMAILS/);
+  assert.doesNotMatch(adminPage, /signin-with-chatgpt|使用 ChatGPT 登录/);
 });
 
 test("removes the disposable starter preview", async () => {

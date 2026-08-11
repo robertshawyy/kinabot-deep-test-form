@@ -8,26 +8,6 @@ type FeedbackRow = {
   created_at: string;
 };
 
-function isLocalHost(hostname: string) {
-  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
-}
-
-async function isAuthorized(request: Request) {
-  if (!(await hasAdminSession(request))) return { allowed: false, reason: "password-required" };
-
-  const hostname = new URL(request.url).hostname;
-  if (isLocalHost(hostname)) return { allowed: true, reason: "local" };
-
-  const allowedEmails = (env.FEEDBACK_ADMIN_EMAILS ?? "")
-    .split(",")
-    .map((email) => email.trim().toLowerCase())
-    .filter(Boolean);
-  const viewerEmail = request.headers.get("oai-authenticated-user-email")?.trim().toLowerCase() ?? "";
-  if (allowedEmails.length === 0) return { allowed: false, reason: "not-configured" };
-  if (!viewerEmail) return { allowed: false, reason: "sign-in" };
-  return { allowed: allowedEmails.includes(viewerEmail), reason: "allowlist" };
-}
-
 function parseFeedback(row: FeedbackRow): FeedbackInsight | null {
   try {
     const body = JSON.parse(row.response_json) as Record<string, unknown>;
@@ -46,14 +26,11 @@ function countBy(values: string[]) {
 }
 
 export async function GET(request: Request) {
-  const authorization = await isAuthorized(request);
-  if (!authorization.allowed) {
-    const status = authorization.reason === "password-required" || authorization.reason === "sign-in"
-      ? 401
-      : authorization.reason === "not-configured"
-        ? 503
-        : 403;
-    return Response.json({ error: authorization.reason }, { status });
+  if (!(await hasAdminSession(request))) {
+    return Response.json(
+      { error: "password-required" },
+      { status: 401, headers: { "cache-control": "no-store" } },
+    );
   }
 
   try {

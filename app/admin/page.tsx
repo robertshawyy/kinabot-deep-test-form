@@ -92,7 +92,7 @@ function SignalList({ title, subtitle, items }: { title: string; subtitle: strin
 export default function FeedbackAdminPage() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<"" | "password" | "auth" | "config" | "load">("password");
+  const [error, setError] = useState<"" | "password" | "load">("password");
   const [filter, setFilter] = useState<"all" | Priority>("all");
   const [copyState, setCopyState] = useState("复制洞察摘要");
   const [password, setPassword] = useState("");
@@ -107,12 +107,7 @@ export default function FeedbackAdminPage() {
         headers: { authorization: `Bearer ${token}` },
       });
       if (response.status === 401 || response.status === 403) {
-        const result = await response.json().catch(() => ({ error: "" })) as { error?: string };
-        setError(result.error === "password-required" ? "password" : "auth");
-        return;
-      }
-      if (response.status === 503) {
-        setError("config");
+        setError("password");
         return;
       }
       if (!response.ok) throw new Error("dashboard request failed");
@@ -266,9 +261,8 @@ export default function FeedbackAdminPage() {
       <main className="admin-access-page">
         <section>
           <p className="eyebrow">Maintainer access</p>
-          <h1>{error === "config" ? "维护者名单尚未配置" : error === "auth" ? "此页面仅限维护者" : "暂时无法读取反馈"}</h1>
-          <p>{error === "config" ? "部署后需要配置 FEEDBACK_ADMIN_EMAILS，多个邮箱以逗号分隔。" : error === "auth" ? "请使用获授权的 ChatGPT 账户登录后再打开此页面。" : "本地反馈数据库可能暂时不可用，请稍后重试。"}</p>
-          {error === "auth" && <a className="button button-primary" href="/signin-with-chatgpt?return_to=%2Fadmin">使用 ChatGPT 登录</a>}
+          <h1>暂时无法读取反馈</h1>
+          <p>反馈数据库可能暂时不可用，请稍后重试。</p>
           <button className="button button-secondary" type="button" onClick={() => { setLoading(true); void loadDashboard(sessionToken); }}>重新尝试</button>
         </section>
       </main>
