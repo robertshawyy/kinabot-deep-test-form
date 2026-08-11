@@ -1,36 +1,84 @@
 import { env } from "cloudflare:workers";
+import { deriveFeedbackInsight } from "@/lib/feedback-insights";
 
-const CREATE_RESPONSES_TABLE = `
-  CREATE TABLE IF NOT EXISTS deep_test_responses (
+const CREATE_FEEDBACK_TABLE = `
+  CREATE TABLE IF NOT EXISTS deep_user_feedback (
     id TEXT PRIMARY KEY NOT NULL,
-    participant_code TEXT NOT NULL,
-    test_stage TEXT NOT NULL,
-    language TEXT NOT NULL,
-    overall_rating INTEGER NOT NULL,
-    interview_interest TEXT NOT NULL,
+    feedback_type TEXT NOT NULL,
+    task_outcome TEXT NOT NULL,
+    impact TEXT NOT NULL,
+    analysis_related TEXT NOT NULL,
+    nps INTEGER NOT NULL,
+    technical_info_consent INTEGER NOT NULL DEFAULT 0,
     response_json TEXT NOT NULL,
     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
   )
 `;
 
-type Submission = {
-  [key: string]: unknown;
-  participantCode?: unknown;
-  testStage?: unknown;
-  language?: unknown;
-  overallRating?: unknown;
-  interviewInterest?: unknown;
-  contactEmail?: unknown;
-  finalConsent?: unknown;
-  website?: unknown;
-  startedAt?: unknown;
-};
+const CREATE_INSIGHTS_TABLE = `
+  CREATE TABLE IF NOT EXISTS feedback_insights (
+    feedback_id TEXT PRIMARY KEY NOT NULL,
+    priority_level TEXT NOT NULL,
+    priority_score INTEGER NOT NULL,
+    headline TEXT NOT NULL,
+    essence TEXT NOT NULL,
+    recommended_action TEXT NOT NULL,
+    themes_json TEXT NOT NULL,
+    risk_flags_json TEXT NOT NULL,
+    insight_json TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+  )
+`;
+
+type Submission = Record<string, unknown>;
+
+const requiredStrings = [
+  "feedbackType",
+  "issueStage",
+  "taskOutcome",
+  "actualEvent",
+  "expectedEvent",
+  "frequency",
+  "impact",
+  "analysisRelated",
+  "metricsUnderstanding",
+  "scoreDirectionUnderstanding",
+  "transcriptPreviewPreference",
+  "calculationBasisPreference",
+  "selfUnderstandingValue",
+  "wellnessAdviceValue",
+  "boundaryNonMedical",
+  "boundarySampleOnly",
+  "boundaryNoMedicalDecision",
+  "screenshotWillingness",
+  "anonymousTechConsent",
+  "topImprovement",
+  "retentionPriority",
+  "usageFrequency",
+  "followUpPreference",
+];
+
+const requiredArrays = ["attemptedTasks", "troubleshooting", "privacyConcerns"];
+
+function isNonEmptyText(value: unknown) {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function exceedsTextLimit(body: Submission) {
+  const limits: Record<string, number> = {
+    actualEvent: 500,
+    expectedEvent: 300,
+    surprisingResult: 300,
+    privacyDetail: 500,
+    topImprovement: 300,
+    otherFeedback: 500,
+  };
+  return Object.entries(limits).some(([key, limit]) => typeof body[key] === "string" && body[key].length > limit);
+}
 
 export async function POST(request: Request) {
   const contentLength = Number(request.headers.get("content-length") ?? 0);
-  if (contentLength > 60_000) {
-    return Response.json({ error: "Payload too large" }, { status: 413 });
-  }
+  if (contentLength > 70_000) return Response.json({ error: "Payload too large" }, { status: 413 });
 
   let body: Submission;
   try {
@@ -39,62 +87,75 @@ export async function POST(request: Request) {
     return Response.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  if (body.website) {
-    return Response.json({ error: "Invalid submission" }, { status: 400 });
-  }
+  if (body.website) return Response.json({ error: "Invalid submission" }, { status: 400 });
 
-  const participantCode = typeof body.participantCode === "string" ? body.participantCode.trim().slice(0, 40) : "";
-  const testStage = typeof body.testStage === "string" ? body.testStage.slice(0, 30) : "";
-  const language = typeof body.language === "string" ? body.language.slice(0, 20) : "";
-  const overallRating = typeof body.overallRating === "number" ? body.overallRating : 0;
-  const interviewInterest = typeof body.interviewInterest === "string" ? body.interviewInterest.slice(0, 10) : "no";
-  const startedAt = typeof body.startedAt === "number" ? body.startedAt : 0;
-  const requiredTextFields = ["role", "ageRange", "device", "priorAiUse", "completionTime", "expectedResult", "valuable", "improvement", "futureUse"];
-  const requiredRatings = ["taskEase", "clarityRating", "trustRating", "privacyRating"];
-  const hasRequiredText = requiredTextFields.every((key) => typeof body[key] === "string" && body[key].trim().length > 0);
-  const hasRequiredRatings = requiredRatings.every((key) => typeof body[key] === "number" && body[key] >= 1 && body[key] <= 7);
-  const hasRequiredConsent = ["understoodNonMedical", "voiceConsent", "voluntaryConsent", "privacyReview", "finalConsent"].every((key) => body[key] === true);
-  const hasCompletedTasks = Array.isArray(body.completedTasks) && body.completedTasks.length > 0;
-  const hasValidNps = typeof body.nps === "number" && body.nps >= 0 && body.nps <= 10;
+  const hasRequiredStrings = requiredStrings.every((key) => isNonEmptyText(body[key]));
+  const hasRequiredArrays = requiredArrays.every((key) => Array.isArray(body[key]) && body[key].length > 0);
+  const nps = typeof body.nps === "number" ? body.nps : -1;
+  const analysisRelated = typeof body.analysisRelated === "string" ? body.analysisRelated : "";
+  const hasAnalysisDetails = analysisRelated !== "yes" || (
+    Array.isArray(body.affectedMetrics) && body.affectedMetrics.length > 0 &&
+    Array.isArray(body.metricIssueTypes) && body.metricIssueTypes.length > 0 &&
+    ["recordingMethod", "recordingLanguage", "recordingDuration", "recordingEnvironment", "obviousPauses", "multipleSpeakers", "speakingStyle", "transcriptionAccuracy"].every((key) => isNonEmptyText(body[key]))
+  );
 
   if (
-    !/^[A-Z0-9_-]{3,40}$/i.test(participantCode) ||
-    !testStage ||
-    !language ||
-    overallRating < 1 ||
-    overallRating > 7 ||
-    !hasRequiredText ||
-    !hasRequiredRatings ||
-    !hasRequiredConsent ||
-    !hasCompletedTasks ||
-    !hasValidNps
+    !hasRequiredStrings ||
+    !hasRequiredArrays ||
+    !hasAnalysisDetails ||
+    nps < 0 ||
+    nps > 10 ||
+    body.sensitiveInfoConfirmation !== true ||
+    body.nonMedicalConfirmation !== true ||
+    exceedsTextLimit(body)
   ) {
-    return Response.json({ error: "Missing required fields" }, { status: 422 });
+    return Response.json({ error: "Missing or invalid required fields" }, { status: 422 });
   }
+
+  const startedAt = typeof body.startedAt === "number" ? body.startedAt : 0;
   if (startedAt > 0 && Date.now() - startedAt < 4_000) {
     return Response.json({ error: "Submission completed too quickly" }, { status: 422 });
   }
-  if (interviewInterest === "yes" && (typeof body.contactEmail !== "string" || !/^\S+@\S+\.\S+$/.test(body.contactEmail))) {
-    return Response.json({ error: "A valid contact email is required" }, { status: 422 });
-  }
 
-  const id = `KDT-${crypto.randomUUID().split("-")[0].toUpperCase()}`;
-  const safeJson = JSON.stringify({ ...body, website: undefined });
-  if (safeJson.length > 55_000) {
-    return Response.json({ error: "Payload too large" }, { status: 413 });
-  }
+  const safeBody: Submission = { ...body, website: undefined };
+  const technicalInfoConsent = body.anonymousTechConsent === "yes" ? 1 : 0;
+  if (!technicalInfoConsent) delete safeBody.technicalContext;
+  const safeJson = JSON.stringify(safeBody);
+  if (safeJson.length > 65_000) return Response.json({ error: "Payload too large" }, { status: 413 });
+
+  const id = `KFB-${crypto.randomUUID().split("-")[0].toUpperCase()}`;
+  const feedbackType = String(body.feedbackType).slice(0, 80);
+  const taskOutcome = String(body.taskOutcome).slice(0, 80);
+  const impact = String(body.impact).slice(0, 100);
+  const insight = deriveFeedbackInsight(safeBody, id);
 
   try {
-    await env.DB.prepare(CREATE_RESPONSES_TABLE).run();
-    await env.DB.prepare(
-      `INSERT INTO deep_test_responses
-       (id, participant_code, test_stage, language, overall_rating, interview_interest, response_json)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    )
-      .bind(id, participantCode, testStage, language, overallRating, interviewInterest, safeJson)
-      .run();
+    await env.DB.prepare(CREATE_FEEDBACK_TABLE).run();
+    await env.DB.prepare(CREATE_INSIGHTS_TABLE).run();
+    await env.DB.batch([
+      env.DB.prepare(
+        `INSERT INTO deep_user_feedback
+         (id, feedback_type, task_outcome, impact, analysis_related, nps, technical_info_consent, response_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).bind(id, feedbackType, taskOutcome, impact, analysisRelated, nps, technicalInfoConsent, safeJson),
+      env.DB.prepare(
+        `INSERT INTO feedback_insights
+         (feedback_id, priority_level, priority_score, headline, essence, recommended_action, themes_json, risk_flags_json, insight_json)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).bind(
+        id,
+        insight.priority,
+        insight.priorityScore,
+        insight.headline,
+        insight.essence,
+        insight.recommendedAction,
+        JSON.stringify(insight.themes),
+        JSON.stringify(insight.riskFlags),
+        JSON.stringify(insight),
+      ),
+    ]);
   } catch (error) {
-    console.error("Failed to store deep test response", error);
+    console.error("Failed to store deep user feedback", error);
     return Response.json({ error: "Storage unavailable" }, { status: 503 });
   }
 

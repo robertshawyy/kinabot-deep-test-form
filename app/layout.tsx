@@ -11,25 +11,25 @@ export async function generateMetadata(): Promise<Metadata> {
     : host.startsWith("localhost")
       ? "http"
       : "https";
-  const imageUrl = new URL("/og.png", `${protocol}://${host}`).toString();
+  const imageUrl = new URL("/og-feedback.png", `${protocol}://${host}`).toString();
 
   return {
-    title: "KinaBot 深度体验计划",
-    description: "面向 KinaBot 深度测试参与者的隐私友好型产品反馈表单。",
+    title: "KinaBot 深度用户反馈表单",
+    description: "面向 KinaBot 深度测试用户的匿名、隐私友好型产品反馈表单。",
     icons: {
-      icon: "/og.png",
-      shortcut: "/og.png",
+      icon: "/og-feedback.png",
+      shortcut: "/og-feedback.png",
     },
     openGraph: {
-      title: "KinaBot 深度体验计划",
-      description: "让每一次倾听，更有尊严。",
+      title: "KinaBot 深度用户反馈表单",
+      description: "把真实问题，说清楚就好。",
       type: "website",
-      images: [{ url: imageUrl, width: 1536, height: 1024, alt: "KinaBot 深度体验计划" }],
+      images: [{ url: imageUrl, width: 1536, height: 1024, alt: "KinaBot 深度用户反馈表单" }],
     },
     twitter: {
       card: "summary_large_image",
-      title: "KinaBot 深度体验计划",
-      description: "让每一次倾听，更有尊严。",
+      title: "KinaBot 深度用户反馈表单",
+      description: "把真实问题，说清楚就好。",
       images: [imageUrl],
     },
   };

@@ -11,3 +11,28 @@ export const deepTestResponses = sqliteTable("deep_test_responses", {
   responseJson: text("response_json").notNull(),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
+
+export const deepUserFeedback = sqliteTable("deep_user_feedback", {
+  id: text("id").primaryKey(),
+  feedbackType: text("feedback_type").notNull(),
+  taskOutcome: text("task_outcome").notNull(),
+  impact: text("impact").notNull(),
+  analysisRelated: text("analysis_related").notNull(),
+  nps: integer("nps").notNull(),
+  technicalInfoConsent: integer("technical_info_consent").notNull().default(0),
+  responseJson: text("response_json").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
+
+export const feedbackInsights = sqliteTable("feedback_insights", {
+  feedbackId: text("feedback_id").primaryKey(),
+  priorityLevel: text("priority_level").notNull(),
+  priorityScore: integer("priority_score").notNull(),
+  headline: text("headline").notNull(),
+  essence: text("essence").notNull(),
+  recommendedAction: text("recommended_action").notNull(),
+  themesJson: text("themes_json").notNull(),
+  riskFlagsJson: text("risk_flags_json").notNull(),
+  insightJson: text("insight_json").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
