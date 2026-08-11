@@ -33,6 +33,7 @@ test("server-renders the KinaBot deep test form", async () => {
   assert.match(html, /维护者入口/);
   assert.equal(response.headers.get("x-content-type-options"), "nosniff");
   assert.equal(response.headers.get("x-frame-options"), "DENY");
+  assert.match(response.headers.get("cache-control") ?? "", /no-store/);
   assert.doesNotMatch(html, /codex-preview|react-loading-skeleton/i);
 });
 
@@ -71,6 +72,21 @@ test("protects the feedback radar with a server-side password session", async ()
   assert.match(authHelper, /DEFAULT_ADMIN_PASSWORD = "xyz123"/);
   assert.doesNotMatch(insightRoute, /oai-authenticated-user-email|FEEDBACK_ADMIN_EMAILS/);
   assert.doesNotMatch(adminPage, /signin-with-chatgpt|使用 ChatGPT 登录/);
+});
+
+test("makes feedback submission retry-safe and time-bounded", async () => {
+  const [page, responseRoute, worker] = await Promise.all([
+    readFile(new URL("../app/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/responses/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../worker/index.ts", import.meta.url), "utf8"),
+  ]);
+  assert.match(page, /submissionTokenRef/);
+  assert.match(page, /AbortController/);
+  assert.match(page, /15_000/);
+  assert.match(responseRoute, /INSERT OR IGNORE INTO deep_user_feedback/);
+  assert.match(responseRoute, /alreadySaved: true/);
+  assert.match(worker, /no-store, no-cache, must-revalidate/);
+  assert.match(worker, /\/_next\/static\//);
 });
 
 test("removes the disposable starter preview", async () => {

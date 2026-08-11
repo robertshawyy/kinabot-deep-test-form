@@ -117,13 +117,17 @@ export async function POST(request: Request) {
     return Response.json({ error: "Submission completed too quickly" }, { status: 422 });
   }
 
-  const safeBody: Submission = { ...body, website: undefined };
+  const suppliedToken = typeof body.submissionToken === "string" ? body.submissionToken : "";
+  const submissionToken = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(suppliedToken)
+    ? suppliedToken
+    : crypto.randomUUID();
+  const safeBody: Submission = { ...body, website: undefined, submissionToken: undefined };
   const technicalInfoConsent = body.anonymousTechConsent === "yes" ? 1 : 0;
   if (!technicalInfoConsent) delete safeBody.technicalContext;
   const safeJson = JSON.stringify(safeBody);
   if (safeJson.length > 65_000) return Response.json({ error: "Payload too large" }, { status: 413 });
 
-  const id = `KFB-${crypto.randomUUID().split("-")[0].toUpperCase()}`;
+  const id = `KFB-${submissionToken.replaceAll("-", "").slice(0, 12).toUpperCase()}`;
   const feedbackType = String(body.feedbackType).slice(0, 80);
   const taskOutcome = String(body.taskOutcome).slice(0, 80);
   const impact = String(body.impact).slice(0, 100);
@@ -132,14 +136,21 @@ export async function POST(request: Request) {
   try {
     await env.DB.prepare(CREATE_FEEDBACK_TABLE).run();
     await env.DB.prepare(CREATE_INSIGHTS_TABLE).run();
+    const existing = await env.DB.prepare("SELECT id FROM deep_user_feedback WHERE id = ? LIMIT 1").bind(id).first<{ id: string }>();
+    if (existing) {
+      return Response.json(
+        { id: existing.id, alreadySaved: true },
+        { status: 200, headers: { "cache-control": "no-store" } },
+      );
+    }
     await env.DB.batch([
       env.DB.prepare(
-        `INSERT INTO deep_user_feedback
+        `INSERT OR IGNORE INTO deep_user_feedback
          (id, feedback_type, task_outcome, impact, analysis_related, nps, technical_info_consent, response_json)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       ).bind(id, feedbackType, taskOutcome, impact, analysisRelated, nps, technicalInfoConsent, safeJson),
       env.DB.prepare(
-        `INSERT INTO feedback_insights
+        `INSERT OR IGNORE INTO feedback_insights
          (feedback_id, priority_level, priority_score, headline, essence, recommended_action, themes_json, risk_flags_json, insight_json)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       ).bind(
@@ -159,5 +170,5 @@ export async function POST(request: Request) {
     return Response.json({ error: "Storage unavailable" }, { status: 503 });
   }
 
-  return Response.json({ id }, { status: 201 });
+  return Response.json({ id }, { status: 201, headers: { "cache-control": "no-store" } });
 }

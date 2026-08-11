@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 const steps = [
   { number: "01", short: "反馈定位", title: "这次反馈主要关于什么？" },
@@ -290,6 +290,7 @@ function DeepFeedbackForm() {
   const [draftReady, setDraftReady] = useState(false);
   const [submitState, setSubmitState] = useState<"idle" | "submitting" | "success" | "error">("idle");
   const [receiptId, setReceiptId] = useState("");
+  const submissionTokenRef = useRef("");
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -319,6 +320,7 @@ function DeepFeedbackForm() {
   const progress = useMemo(() => ((step + 1) / steps.length) * 100, [step]);
 
   const update = <K extends keyof FormData>(key: K, value: FormData[K]) => {
+    submissionTokenRef.current = "";
     setData((current) => ({ ...current, [key]: value }));
     setErrors((current) => {
       if (!current[key]) return current;
@@ -435,7 +437,9 @@ function DeepFeedbackForm() {
     if (!validateStep(5)) return;
     setSubmitState("submitting");
 
-    const submission: FormData = { ...data };
+    const submissionToken = submissionTokenRef.current || crypto.randomUUID();
+    submissionTokenRef.current = submissionToken;
+    const submission: FormData & { submissionToken: string } = { ...data, submissionToken };
     if (data.anonymousTechConsent === "yes") {
       submission.technicalContext = {
         browser: navigator.userAgent.slice(0, 300),
@@ -447,20 +451,26 @@ function DeepFeedbackForm() {
       delete submission.technicalContext;
     }
 
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 15_000);
     try {
       const response = await fetch("/api/responses", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(submission),
+        signal: controller.signal,
       });
       if (!response.ok) throw new Error("submission failed");
       const result = (await response.json()) as { id: string };
       setReceiptId(result.id);
       setSubmitState("success");
+      submissionTokenRef.current = "";
       window.sessionStorage.removeItem("kina-deep-feedback-draft-v2");
       window.scrollTo({ top: 0, behavior: "smooth" });
     } catch {
       setSubmitState("error");
+    } finally {
+      window.clearTimeout(timeout);
     }
   };
 
@@ -471,6 +481,7 @@ function DeepFeedbackForm() {
     setErrors({});
     setReceiptId("");
     setSubmitState("idle");
+    submissionTokenRef.current = "";
   };
 
   if (submitState === "success") {
@@ -683,7 +694,7 @@ function DeepFeedbackForm() {
                     <label className={`simple-check final-consent${data.nonMedicalConfirmation ? " is-checked" : ""}`} htmlFor="nonMedicalConfirmation"><input id="nonMedicalConfirmation" type="checkbox" checked={data.nonMedicalConfirmation} onChange={(event) => update("nonMedicalConfirmation", event.target.checked)} /><span className="check-box" aria-hidden="true">✓</span><span><strong>我理解提交反馈不会获得医疗建议或认知诊断。</strong><small>如有健康疑虑，请联系合资格的医疗专业人员。</small></span></label><FieldError message={errors.nonMedicalConfirmation} />
                   </div>
                   <div className="honeypot" aria-hidden="true"><label htmlFor="website">Website</label><input id="website" tabIndex={-1} autoComplete="off" value={data.website} onChange={(event) => update("website", event.target.value)} /></div>
-                  {submitState === "error" && <div className="submit-error" role="alert">暂时无法提交。你的草稿仍保存在当前浏览器标签页，请稍后再试。</div>}
+                  {submitState === "error" && <div className="submit-error" role="alert">提交响应暂时中断，草稿仍在当前标签页。请直接再次提交，系统会自动避免重复保存。</div>}
                 </div>
               )}
 
