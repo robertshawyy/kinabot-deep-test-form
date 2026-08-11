@@ -43,6 +43,7 @@ test("server-renders the maintainer feedback radar", async () => {
   assert.match(html, /<title>反馈雷达 · KinaBot<\/title>/i);
   assert.match(html, /进入反馈雷达/);
   assert.match(html, /value=""/);
+  assert.match(html, /<a class="admin-back-link" href="\/">← 返回反馈表单<\/a>/);
   const adminPage = await readFile(new URL("../app/admin/page.tsx", import.meta.url), "utf8");
   assert.match(adminPage, /反馈雷达/);
   assert.match(adminPage, /每 30 秒自动更新/);

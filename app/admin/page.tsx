@@ -250,7 +250,9 @@ export default function FeedbackAdminPage() {
               {signingIn ? "正在验证…" : "进入反馈雷达"}
             </button>
           </form>
-          <Link className="admin-back-link" href="/">← 返回反馈表单</Link>
+          {/* Use a native navigation here so the published Worker always performs a full route change. */}
+          {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+          <a className="admin-back-link" href="/">← 返回反馈表单</a>
         </section>
       </main>
     );
@@ -275,7 +277,12 @@ export default function FeedbackAdminPage() {
     <main className="admin-shell">
       <header className="admin-header">
         <Link className="brand" href="/admin"><span className="brand-mark" aria-hidden="true"><i /><i /><i /></span><span>Kina</span></Link>
-        <div className="admin-header-meta"><span><i /> 每 30 秒自动更新</span><Link href="/" onClick={signOut}>返回反馈表单 ↗</Link><button type="button" onClick={signOut}>退出维护模式</button></div>
+        <div className="admin-header-meta">
+          <span><i /> 每 30 秒自动更新</span>
+          {/* eslint-disable-next-line @next/next/no-html-link-for-pages */}
+          <a href="/">返回反馈表单 ↗</a>
+          <button type="button" onClick={signOut}>退出维护模式</button>
+        </div>
       </header>
 
       <section className="admin-hero">
