@@ -1,17 +1,26 @@
 import { env } from "cloudflare:workers";
 import { hasAdminSession } from "@/lib/admin-auth";
 import { deriveFeedbackInsight, type FeedbackInsight } from "@/lib/feedback-insights";
+import { ensureFeedbackResolutionTable } from "@/lib/feedback-status";
 
 type FeedbackRow = {
   id: string;
   response_json: string;
   created_at: string;
+  resolved: number;
+  resolved_at: string | null;
 };
 
-function parseFeedback(row: FeedbackRow): FeedbackInsight | null {
+type DashboardInsight = FeedbackInsight & { resolved: boolean; resolvedAt: string | null };
+
+function parseFeedback(row: FeedbackRow): DashboardInsight | null {
   try {
     const body = JSON.parse(row.response_json) as Record<string, unknown>;
-    return deriveFeedbackInsight(body, row.id, row.created_at);
+    return {
+      ...deriveFeedbackInsight(body, row.id, row.created_at),
+      resolved: row.resolved === 1,
+      resolvedAt: row.resolved_at,
+    };
   } catch {
     return null;
   }
@@ -34,17 +43,21 @@ export async function GET(request: Request) {
   }
 
   try {
+    await ensureFeedbackResolutionTable();
     const result = await env.DB.prepare(
-      `SELECT id, response_json, created_at
-       FROM deep_user_feedback
-       ORDER BY created_at DESC`,
+      `SELECT feedback.id, feedback.response_json, feedback.created_at,
+              COALESCE(status.resolved, 0) AS resolved, status.resolved_at
+       FROM deep_user_feedback AS feedback
+       LEFT JOIN feedback_resolution_status AS status ON status.feedback_id = feedback.id
+       ORDER BY feedback.created_at DESC`,
     ).all<FeedbackRow>();
-    const insights = (result.results ?? []).map(parseFeedback).filter((item): item is FeedbackInsight => Boolean(item));
+    const insights = (result.results ?? []).map(parseFeedback).filter((item): item is DashboardInsight => Boolean(item));
+    const unresolvedInsights = insights.filter((item) => !item.resolved);
     const priorityCounts = {
-      urgent: insights.filter((item) => item.priority === "urgent").length,
-      high: insights.filter((item) => item.priority === "high").length,
-      medium: insights.filter((item) => item.priority === "medium").length,
-      observe: insights.filter((item) => item.priority === "observe").length,
+      urgent: unresolvedInsights.filter((item) => item.priority === "urgent").length,
+      high: unresolvedInsights.filter((item) => item.priority === "high").length,
+      medium: unresolvedInsights.filter((item) => item.priority === "medium").length,
+      observe: unresolvedInsights.filter((item) => item.priority === "observe").length,
     };
     const validNps = insights.map((item) => item.nps).filter((score) => score >= 0);
     const averageNps = validNps.length > 0
@@ -56,6 +69,8 @@ export async function GET(request: Request) {
         generatedAt: new Date().toISOString(),
         stats: {
           total: insights.length,
+          unresolved: unresolvedInsights.length,
+          resolved: insights.length - unresolvedInsights.length,
           urgent: priorityCounts.urgent,
           needsAction: priorityCounts.urgent + priorityCounts.high,
           averageNps,
@@ -80,6 +95,8 @@ export async function GET(request: Request) {
         generatedAt: new Date().toISOString(),
         stats: {
           total: 0,
+          unresolved: 0,
+          resolved: 0,
           urgent: 0,
           needsAction: 0,
           averageNps: null,

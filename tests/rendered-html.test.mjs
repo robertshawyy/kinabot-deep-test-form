@@ -49,6 +49,25 @@ test("server-renders the maintainer feedback radar", async () => {
   assert.match(adminPage, /反馈雷达/);
   assert.match(adminPage, /每 30 秒自动更新/);
   assert.match(adminPage, /复制洞察摘要/);
+  assert.match(adminPage, /已修复/);
+  assert.match(adminPage, /toggleResolution/);
+});
+
+test("persists and filters fixed feedback", async () => {
+  const [adminPage, insightRoute, statusRoute, statusHelper, schema] = await Promise.all([
+    readFile(new URL("../app/admin/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/admin/insights/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/admin/feedback-status/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../lib/feedback-status.ts", import.meta.url), "utf8"),
+    readFile(new URL("../db/schema.ts", import.meta.url), "utf8"),
+  ]);
+  assert.match(adminPage, /filter === "resolved"/);
+  assert.match(adminPage, /resolved: !item\.resolved/);
+  assert.match(statusRoute, /hasAdminSession/);
+  assert.match(statusRoute, /setFeedbackResolved/);
+  assert.match(statusHelper, /ON CONFLICT\(feedback_id\) DO UPDATE/);
+  assert.match(insightRoute, /LEFT JOIN feedback_resolution_status/);
+  assert.match(schema, /feedbackResolutionStatus/);
 });
 
 test("protects the feedback radar with a server-side password session", async () => {

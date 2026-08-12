@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 
 type Priority = "urgent" | "high" | "medium" | "observe";
+type InsightFilter = "all" | Priority | "resolved";
 
 type Insight = {
   id: string;
@@ -26,6 +27,8 @@ type Insight = {
   analysisRelated: string;
   nps: number;
   createdAt: string;
+  resolved: boolean;
+  resolvedAt: string | null;
 };
 
 type Signal = { name: string; count: number };
@@ -34,6 +37,8 @@ type DashboardData = {
   generatedAt: string;
   stats: {
     total: number;
+    unresolved: number;
+    resolved: number;
     urgent: number;
     needsAction: number;
     averageNps: number | null;
@@ -56,6 +61,16 @@ const priorityLabels: Record<Priority, string> = {
   medium: "计划改进",
   observe: "持续观察",
 };
+
+function unresolvedPriorityCounts(insights: Insight[]): Record<Priority, number> {
+  const unresolved = insights.filter((item) => !item.resolved);
+  return {
+    urgent: unresolved.filter((item) => item.priority === "urgent").length,
+    high: unresolved.filter((item) => item.priority === "high").length,
+    medium: unresolved.filter((item) => item.priority === "medium").length,
+    observe: unresolved.filter((item) => item.priority === "observe").length,
+  };
+}
 
 function formatDate(value: string) {
   const normalized = value.includes("T") ? value : `${value.replace(" ", "T")}Z`;
@@ -93,12 +108,14 @@ export default function FeedbackAdminPage() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<"" | "password" | "load">("password");
-  const [filter, setFilter] = useState<"all" | Priority>("all");
+  const [filter, setFilter] = useState<InsightFilter>("all");
   const [copyState, setCopyState] = useState("复制洞察摘要");
   const [password, setPassword] = useState("");
   const [passwordError, setPasswordError] = useState("");
   const [signingIn, setSigningIn] = useState(false);
   const [sessionToken, setSessionToken] = useState("");
+  const [updatingIds, setUpdatingIds] = useState<string[]>([]);
+  const [resolutionError, setResolutionError] = useState("");
 
   const loadDashboard = useCallback(async (token: string) => {
     try {
@@ -184,13 +201,61 @@ export default function FeedbackAdminPage() {
 
   const visibleInsights = useMemo(() => {
     if (!data) return [];
-    return filter === "all" ? data.insights : data.insights.filter((item) => item.priority === filter);
+    if (filter === "resolved") return data.insights.filter((item) => item.resolved);
+    const unresolved = data.insights.filter((item) => !item.resolved);
+    return filter === "all" ? unresolved : unresolved.filter((item) => item.priority === filter);
   }, [data, filter]);
+
+  const toggleResolution = async (item: Insight) => {
+    if (updatingIds.includes(item.id)) return;
+    setUpdatingIds((current) => [...current, item.id]);
+    setResolutionError("");
+    try {
+      const response = await fetch("/api/admin/feedback-status", {
+        method: "PATCH",
+        headers: {
+          authorization: `Bearer ${sessionToken}`,
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ feedbackId: item.id, resolved: !item.resolved }),
+      });
+      if (response.status === 401 || response.status === 403) {
+        signOut();
+        return;
+      }
+      if (!response.ok) throw new Error("resolution update failed");
+      const result = await response.json() as { resolved: boolean; resolvedAt: string | null };
+      setData((current) => {
+        if (!current) return current;
+        const insights = current.insights.map((insight) => insight.id === item.id
+          ? { ...insight, resolved: result.resolved, resolvedAt: result.resolvedAt }
+          : insight);
+        const priorityCounts = unresolvedPriorityCounts(insights);
+        const unresolved = insights.filter((insight) => !insight.resolved).length;
+        return {
+          ...current,
+          stats: {
+            ...current.stats,
+            unresolved,
+            resolved: insights.length - unresolved,
+            urgent: priorityCounts.urgent,
+            needsAction: priorityCounts.urgent + priorityCounts.high,
+            priorityCounts,
+          },
+          insights,
+        };
+      });
+    } catch {
+      setResolutionError("状态保存失败，请稍后重试。反馈原状态没有改变。");
+    } finally {
+      setUpdatingIds((current) => current.filter((id) => id !== item.id));
+    }
+  };
 
   const exportCsv = () => {
     if (!data) return;
-    const header = ["反馈编号", "优先级", "优先分", "核心结论", "建议动作", "反馈类型", "发生位置", "影响", "NPS", "提交时间"];
-    const rows = data.insights.map((item) => [item.id, priorityLabels[item.priority], item.priorityScore, item.headline, item.recommendedAction, item.feedbackType, item.issueStage, item.impact, item.nps, item.createdAt]);
+    const header = ["反馈编号", "修复状态", "修复时间", "优先级", "优先分", "核心结论", "建议动作", "反馈类型", "发生位置", "影响", "NPS", "提交时间"];
+    const rows = data.insights.map((item) => [item.id, item.resolved ? "已修复" : "未修复", item.resolvedAt, priorityLabels[item.priority], item.priorityScore, item.headline, item.recommendedAction, item.feedbackType, item.issueStage, item.impact, item.nps, item.createdAt]);
     const csv = `\uFEFF${[header, ...rows].map((row) => row.map(escapeCsv).join(",")).join("\n")}`;
     const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
     const link = document.createElement("a");
@@ -202,10 +267,10 @@ export default function FeedbackAdminPage() {
 
   const copyDigest = async () => {
     if (!data) return;
-    const topActions = data.insights.filter((item) => item.priority !== "observe").slice(0, 5);
+    const topActions = data.insights.filter((item) => !item.resolved && item.priority !== "observe").slice(0, 5);
     const digest = [
       `KinaBot 反馈洞察 · ${new Date(data.generatedAt).toLocaleDateString("zh-CN")}`,
-      `累计反馈：${data.stats.total}｜立即复核：${data.stats.urgent}｜优先处理：${data.stats.needsAction}｜平均 NPS：${data.stats.averageNps ?? "—"}`,
+      `累计反馈：${data.stats.total}｜未修复：${data.stats.unresolved}｜已修复：${data.stats.resolved}｜立即复核：${data.stats.urgent}｜平均 NPS：${data.stats.averageNps ?? "—"}`,
       "",
       `高频主题：${data.signals.themes.slice(0, 5).map((item) => `${item.name}（${item.count}）`).join("、") || "暂无"}`,
       "",
@@ -307,20 +372,37 @@ export default function FeedbackAdminPage() {
       <section className="admin-main-grid">
         <div className="insight-feed">
           <div className="feed-heading">
-            <div><p className="eyebrow">Action queue</p><h2>最值得先看的反馈</h2></div>
+            <div><p className="eyebrow">Action queue</p><h2>{filter === "resolved" ? "已修复" : "最值得先看的反馈"}</h2></div>
             <div className="filter-row">
-              {(["all", "urgent", "high", "medium", "observe"] as const).map((item) => (
+              {(["all", "urgent", "high", "medium", "observe", "resolved"] as const).map((item) => (
                 <button key={item} type="button" className={filter === item ? "is-active" : ""} onClick={() => setFilter(item)}>
-                  {item === "all" ? "全部" : priorityLabels[item]}
-                  <span>{item === "all" ? data.stats.total : data.stats.priorityCounts[item]}</span>
+                  {item === "all" ? "全部" : item === "resolved" ? "已修复" : priorityLabels[item]}
+                  <span>{item === "all" ? data.stats.unresolved : item === "resolved" ? data.stats.resolved : data.stats.priorityCounts[item]}</span>
                 </button>
               ))}
             </div>
           </div>
 
-          {visibleInsights.length === 0 ? <div className="admin-empty"><strong>这个分类暂时没有反馈</strong><span>新的提交会在 30 秒内自动出现。</span></div> : visibleInsights.map((item) => (
-            <article className={`insight-card priority-${item.priority}`} key={item.id}>
-              <div className="insight-topline"><span className="priority-pill">{priorityLabels[item.priority]} · {item.priorityScore}</span><time>{formatDate(item.createdAt)}</time></div>
+          {resolutionError && <p className="resolution-error" role="alert">{resolutionError}</p>}
+          {visibleInsights.length === 0 ? <div className="admin-empty"><strong>{filter === "resolved" ? "暂时没有已修复的反馈" : "这个分类暂时没有反馈"}</strong><span>{filter === "resolved" ? "点击反馈上的“未修复”按钮后，它会进入这里。" : "新的提交会在 30 秒内自动出现。"}</span></div> : visibleInsights.map((item) => (
+            <article className={`insight-card priority-${item.priority}${item.resolved ? " is-resolved" : ""}`} key={item.id}>
+              <div className="insight-topline">
+                <div className="insight-state-line">
+                  <span className="priority-pill">{priorityLabels[item.priority]} · {item.priorityScore}</span>
+                  <button
+                    className={`resolution-toggle${item.resolved ? " is-resolved" : ""}`}
+                    type="button"
+                    aria-pressed={item.resolved}
+                    title={item.resolved ? "点击恢复为未修复" : "点击标记为已修复"}
+                    disabled={updatingIds.includes(item.id)}
+                    onClick={() => void toggleResolution(item)}
+                  >
+                    <span aria-hidden="true">{item.resolved ? "✓" : "○"}</span>
+                    {updatingIds.includes(item.id) ? "保存中…" : item.resolved ? "已修复" : "未修复"}
+                  </button>
+                </div>
+                <time>{formatDate(item.createdAt)}</time>
+              </div>
               <h3>{item.headline}</h3>
               <p className="insight-essence">{item.essence}</p>
               <div className="recommended-action"><span>建议动作</span><strong>{item.recommendedAction}</strong></div>

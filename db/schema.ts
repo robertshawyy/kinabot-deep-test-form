@@ -36,3 +36,10 @@ export const feedbackInsights = sqliteTable("feedback_insights", {
   insightJson: text("insight_json").notNull(),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 });
+
+export const feedbackResolutionStatus = sqliteTable("feedback_resolution_status", {
+  feedbackId: text("feedback_id").primaryKey().references(() => deepUserFeedback.id, { onDelete: "cascade" }),
+  resolved: integer("resolved").notNull().default(0),
+  resolvedAt: text("resolved_at"),
+  updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+});
