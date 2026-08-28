@@ -1,50 +1,131 @@
-# KinaBot 深度用户反馈表单
+# KinaBot Deep Test Form
 
-这是一个与 `aoi_kinabot_app/` 完全独立的深度测试反馈网页。它不会导入或修改 KinaBot 应用代码。
+KinaBot Deep Test Form is a standalone web application for collecting structured feedback from people testing KinaBot. It is independent of `aoi_kinabot_app/`: it does not import, modify, or run the main KinaBot application.
 
-## 表单内容
+This project collects product feedback. It is not a medical device, a diagnostic tool, or a clinical research system.
 
-- 六步响应式中文表单：反馈定位、问题复现、分析专项、理解价值、隐私安全与改进优先级
-- 逐步必填校验、键盘可用性和移动端布局
-- 当前浏览器标签页自动保存未提交草稿，关闭标签页后自动清除
-- Cloudflare D1 持久化提交结果，并生成随机反馈编号
-- 按相关性自动跳过分析结果专项问题
-- 经明确同意才附加匿名浏览器与显示环境信息
-- 不收集年龄、身份或联系方式，并明确非医疗器械边界
-- Open Graph / X 分享预览图
-- `/admin` 维护者反馈雷达：自动提炼优先级、问题核心、建议动作和风险标签
-- 累计展示高频反馈类型、摩擦步骤、继续使用的关键和主题趋势
-- 支持 30 秒自动刷新、洞察摘要复制和 CSV 导出
-- 每条反馈可在“未修复 / 已修复”之间反复切换，状态保存在 D1，并集中进入“已修复”栏
+## What the form provides
 
-## 维护者反馈雷达
+- A six-step, responsive questionnaire covering task context, reproduction details, analysis results, comprehension, privacy, and improvement priorities
+- Step-by-step required-field validation and conditional questions
+- Keyboard-accessible controls and mobile-friendly layouts
+- Tab-scoped draft recovery with `sessionStorage`
+- Retry-safe submissions with a reusable client submission token and a generated feedback receipt ID
+- Server-side validation, payload limits, a honeypot field, and a minimum completion-time check
+- Durable response storage in Cloudflare D1
+- Optional browser, locale, time-zone, and viewport context collected only after explicit consent
+- Open Graph and X social-preview metadata
 
-本地开发时打开 `http://localhost:3000/admin`，输入维护密码后即可查看。密码和访问凭证不会保存在浏览器中，离开或刷新反馈雷达后需要重新输入。页面会直接读取本地 D1 数据库，不需要再手动执行 SQL。
+## How submissions work
 
-部署后通过 Sites 环境变量 `FEEDBACK_ADMIN_PASSWORD` 设置线上强密码。维护者只需输入同一个维护密码即可进入；请仅通过可信渠道分享，并在维护人员变动时及时更换。
+1. The browser validates the current step and keeps an unfinished draft in the active tab.
+2. The completed form sends JSON to `POST /api/responses`.
+3. The server validates required fields, consent confirmations, conditional answers, text limits, and basic abuse signals.
+4. The server removes technical context when consent was not granted.
+5. A retry-safe `KFB-...` identifier is generated and the structured response is stored in D1.
+6. The browser displays the receipt ID and removes the local draft after a successful response.
 
-提炼过程使用本地确定性规则，不会把反馈正文发送给外部 AI 服务。新提交会保存洞察快照，管理页面也会重新计算全部历史反馈，因此提炼逻辑升级后，旧数据会同步获得改进。
+## Technology
 
-## 本地运行
+- React and TypeScript
+- Vinext and Vite
+- Cloudflare Workers
+- Cloudflare D1 with a SQLite schema
+- Drizzle ORM and Drizzle Kit for schema definitions and migrations
+- Node.js test runner and ESLint
 
-需要 Node.js `>=22.13.0`。
+Exact dependency versions are defined in `package.json` and `package-lock.json`.
+
+## Requirements
+
+- Node.js `>=22.13.0`
+- npm
+- A Cloudflare-compatible local runtime for the D1 binding used by Vinext
+
+## Local development
 
 ```bash
+git clone https://github.com/robertshawyy/kinabot-deep-test-form.git
+cd kinabot-deep-test-form
 npm install
 npm run dev
 ```
 
-常用检查：
+Open the local URL printed by the development server.
 
-```bash
-npm test
-npx tsc --noEmit
-```
+## Commands
 
-数据库迁移位于 `drizzle/`，修改 `db/schema.ts` 后运行：
+| Task | Command |
+|---|---|
+| Start the development server | `npm run dev` |
+| Create a production build | `npm run build` |
+| Start the built application | `npm run start` |
+| Build and run the repository tests | `npm test` |
+| Run ESLint | `npm run lint` |
+| Run the TypeScript checker | `npx tsc --noEmit --incremental false` |
+| Generate a database migration | `npm run db:generate` |
+
+## Database
+
+The application expects a D1 binding named `DB`. The logical binding is declared in `.openai/hosting.json`.
+
+- `db/schema.ts` is the source schema.
+- `drizzle/` contains ordered SQL migrations and Drizzle metadata.
+- `drizzle.config.ts` configures SQLite migration generation.
+
+After changing `db/schema.ts`, generate and inspect the migration before committing it:
 
 ```bash
 npm run db:generate
 ```
 
-请勿在反馈文本中收集病历、诊断、完整转写或未经同意的第三方信息。
+Do not edit an existing applied migration to represent a new schema change. Add a new migration instead.
+
+## Data and privacy boundaries
+
+The form stores structured selections and free-text feedback in D1. When a participant explicitly agrees, it can also attach a shortened browser user-agent string, interface locale, time zone, and viewport size.
+
+The form does not provide fields for names, email addresses, raw audio, full transcripts, medical records, diagnoses, passwords, verification codes, or API keys. Participants are instructed not to place this information in free-text responses.
+
+Unsubmitted drafts stay in the browser tab through `sessionStorage` and are removed after a successful submission. Submitted responses persist in D1. This repository does not currently provide an end-user deletion workflow or an automated retention schedule, so deployments need an explicit data-retention and deletion policy.
+
+Do not use the form to report exploit instructions, credentials, private keys, or other sensitive security details.
+
+## Testing scope
+
+`npm test` creates a production build and runs the Node test suite in `tests/`. The current suite checks server rendering and selected structural safeguards. It does not replace live D1 integration tests, full browser interaction testing, accessibility review, load testing, or a security audit.
+
+Before submitting a change, run:
+
+```bash
+npm test
+npm run lint
+npx tsc --noEmit --incremental false
+```
+
+## Repository structure
+
+| Path | Responsibility |
+|---|---|
+| `app/page.tsx` | Form state, step validation, draft recovery, and submission UI |
+| `app/api/responses/route.ts` | Server-side validation and D1 persistence |
+| `app/globals.css` | Shared responsive styling |
+| `db/schema.ts` | D1/SQLite schema definitions |
+| `drizzle/` | Generated database migrations |
+| `worker/index.ts` | Cloudflare Worker entry point and response headers |
+| `tests/` | Build-level and rendered-output tests |
+
+## Project limits
+
+- Feedback responses can help identify usability, reliability, comprehension, and privacy problems.
+- Response counts and recommendation scores do not prove market demand or product effectiveness.
+- Feedback about speech or language patterns does not establish clinical or diagnostic validity.
+- The project is intended for structured product testing, not medical decision-making.
+
+## Contributing
+
+Keep changes focused and preserve the privacy and non-medical boundaries above. Include tests for behavior changes and run the full verification sequence before opening a pull request.
+
+## License
+
+This repository does not currently include a license. Public visibility allows the source to be viewed, but it does not grant permission to copy, modify, redistribute, or use the code. Add a license only after an explicit licensing decision.
