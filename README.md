@@ -128,4 +128,4 @@ Keep changes focused and preserve the privacy and non-medical boundaries above. 
 
 ## License
 
-This repository does not currently include a license. Public visibility allows the source to be viewed, but it does not grant permission to copy, modify, redistribute, or use the code. Add a license only after an explicit licensing decision.
+This project is licensed under the [MIT License](LICENSE).
